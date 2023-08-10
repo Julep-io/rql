@@ -104,6 +104,9 @@ func (p ParseError) Error() string {
 	return p.msg
 }
 
+type Validator func(interface{}) error
+type Converter func(interface{}) interface{}
+
 // field is a configuration of a struct field.
 type Field struct {
 	// Name of the column.
@@ -117,9 +120,9 @@ type Field struct {
 	// All supported operators for this field.
 	FilterOps map[string]bool
 	// Validation for the type. for example, unit8 greater than or equal to 0.
-	ValidateFn func(interface{}) error
+	ValidateFn Validator
 	// ConvertFn converts the given value to the type value.
-	CovertFn func(interface{}) interface{}
+	CovertFn Converter
 }
 
 // A Parser parses various types. The result from the Parse method is a Param object.
@@ -247,6 +250,111 @@ func Column(s string) string {
 	return b.String()
 }
 
+func GetSupportedOps(t reflect.Type) []Op {
+	switch t.Kind() {
+	case reflect.Bool:
+		return []Op{EQ, NEQ}
+	case reflect.String:
+		return []Op{EQ, NEQ, LT, LTE, GT, GTE, LIKE}
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		return []Op{EQ, NEQ, LT, LTE, GT, GTE}
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
+		return []Op{EQ, NEQ, LT, LTE, GT, GTE}
+	case reflect.Float32, reflect.Float64:
+		return []Op{EQ, NEQ, LT, LTE, GT, GTE}
+	case reflect.Struct:
+		switch v := reflect.Zero(t); v.Interface().(type) {
+		case sql.NullBool:
+			return []Op{EQ, NEQ}
+		case sql.NullString:
+			return []Op{EQ, NEQ}
+		case sql.NullInt64:
+			return []Op{EQ, NEQ, LT, LTE, GT, GTE}
+		case sql.NullFloat64:
+			return []Op{EQ, NEQ, LT, LTE, GT, GTE}
+		case time.Time:
+			return []Op{EQ, NEQ, LT, LTE, GT, GTE}
+		default:
+			if v.Type().ConvertibleTo(reflect.TypeOf(time.Time{})) {
+				return []Op{EQ, NEQ, LT, LTE, GT, GTE}
+			}
+			return []Op{}
+		}
+	default:
+		return []Op{}
+	}
+}
+
+func GetConverterFn(t reflect.Type) Converter {
+	layout := ""
+	switch t.Kind() {
+	case reflect.Bool:
+		return valueFn
+	case reflect.String:
+		return valueFn
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		return convertInt
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
+		return convertInt
+	case reflect.Float32, reflect.Float64:
+		return valueFn
+	case reflect.Struct:
+		switch v := reflect.Zero(t); v.Interface().(type) {
+		case sql.NullBool:
+			return valueFn
+		case sql.NullString:
+			return valueFn
+		case sql.NullInt64:
+			return convertInt
+		case sql.NullFloat64:
+			return valueFn
+		case time.Time:
+			return convertTime(layout)
+		default:
+			if v.Type().ConvertibleTo(reflect.TypeOf(time.Time{})) {
+				return convertTime(layout)
+			}
+		}
+	}
+	return valueFn
+}
+
+func GetValidateFn(t reflect.Type) Validator {
+	layout := ""
+	switch t.Kind() {
+	case reflect.Bool:
+		return validateBool
+	case reflect.String:
+		return validateString
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		return validateInt
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
+		return validateUInt
+	case reflect.Float32, reflect.Float64:
+		return validateFloat
+	case reflect.Struct:
+		switch v := reflect.Zero(t); v.Interface().(type) {
+		case sql.NullBool:
+			return validateBool
+		case sql.NullString:
+			return validateString
+		case sql.NullInt64:
+			return validateInt
+		case sql.NullFloat64:
+			return validateFloat
+		case time.Time:
+			return validateTime(layout)
+		default:
+			if !v.Type().ConvertibleTo(reflect.TypeOf(time.Time{})) {
+				return nil
+			}
+			return validateTime(layout)
+		}
+	default:
+		return nil
+	}
+}
+
 // init initializes the parser parsing state. it scans the fields
 // in a breath-first-search order and for each one of the field calls parseField.
 func (p *Parser) init() error {
@@ -319,8 +427,6 @@ func (p *Parser) parseField(sf reflect.StructField) error {
 			p.Log("Ignoring unknown option %q in struct tag", opt)
 		}
 	}
-
-	// backwards compatible
 	if f.Name == "" {
 		if p.NameFn != nil {
 			f.Name = p.NameFn(sf.Name)
@@ -329,55 +435,14 @@ func (p *Parser) parseField(sf reflect.StructField) error {
 		}
 	}
 
-	var filterOps []Op
-	switch typ := indirect(sf.Type); typ.Kind() {
-	case reflect.Bool:
-		f.ValidateFn = validateBool
-		filterOps = append(filterOps, EQ, NEQ)
-	case reflect.String:
-		f.ValidateFn = validateString
-		filterOps = append(filterOps, EQ, NEQ, LT, LTE, GT, GTE, LIKE)
-	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
-		f.ValidateFn = validateInt
-		f.CovertFn = convertInt
-		filterOps = append(filterOps, EQ, NEQ, LT, LTE, GT, GTE)
-	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
-		f.ValidateFn = validateUInt
-		f.CovertFn = convertInt
-		filterOps = append(filterOps, EQ, NEQ, LT, LTE, GT, GTE)
-	case reflect.Float32, reflect.Float64:
-		f.ValidateFn = validateFloat
-		filterOps = append(filterOps, EQ, NEQ, LT, LTE, GT, GTE)
-	case reflect.Struct:
-		switch v := reflect.Zero(typ); v.Interface().(type) {
-		case sql.NullBool:
-			f.ValidateFn = validateBool
-			filterOps = append(filterOps, EQ, NEQ)
-		case sql.NullString:
-			f.ValidateFn = validateString
-			filterOps = append(filterOps, EQ, NEQ)
-		case sql.NullInt64:
-			f.ValidateFn = validateInt
-			f.CovertFn = convertInt
-			filterOps = append(filterOps, EQ, NEQ, LT, LTE, GT, GTE)
-		case sql.NullFloat64:
-			f.ValidateFn = validateFloat
-			filterOps = append(filterOps, EQ, NEQ, LT, LTE, GT, GTE)
-		case time.Time:
-			f.ValidateFn = validateTime(layout)
-			f.CovertFn = convertTime(layout)
-			filterOps = append(filterOps, EQ, NEQ, LT, LTE, GT, GTE)
-		default:
-			if !v.Type().ConvertibleTo(reflect.TypeOf(time.Time{})) {
-				return fmt.Errorf("rql: field type for %q is not supported", sf.Name)
-			}
-			f.ValidateFn = validateTime(layout)
-			f.CovertFn = convertTime(layout)
-			filterOps = append(filterOps, EQ, NEQ, LT, LTE, GT, GTE)
-		}
-	default:
+	t := indirect(sf.Type)
+	filterOps := GetSupportedOps(t)
+	if len(filterOps) == 0 {
 		return fmt.Errorf("rql: field type for %q is not supported", sf.Name)
 	}
+	f.CovertFn = GetConverterFn(t)
+	f.ValidateFn = GetValidateFn(t)
+
 	for _, op := range filterOps {
 		f.FilterOps[p.op(op)] = true
 	}
@@ -415,12 +480,14 @@ func (p *Parser) sort(fields []string) string {
 	sortParams := make([]string, len(fields))
 	for i, field := range fields {
 		expect(field != "", "sort field can not be empty")
+
 		var orderBy string
-		// if the sort field prefixed by an order indicator.
-		if order, ok := sortDirection[field[0]]; ok {
-			orderBy = order
+		f0 := field[0]
+		if f0 == byte(ASC) || f0 == byte(DESC) {
+			orderBy = p.GetDBDir(Direction(f0))
 			field = field[1:]
 		}
+
 		expect(p.fields[field] != nil, "unrecognized key %q for sorting", field)
 		expect(p.fields[field].Sortable, "field %q is not sortable", field)
 		colName := p.colName(field)
@@ -466,7 +533,7 @@ func (p *parseState) relOp(op Op, terms []interface{}) {
 	for _, t := range terms {
 		if i > 0 {
 			p.WriteByte(' ')
-			p.WriteString(op.SQL())
+			p.WriteString(p.GetDBOp(op))
 			p.WriteByte(' ')
 		}
 		mt, ok := t.(map[string]interface{})
@@ -510,7 +577,7 @@ func (p *parseState) field(f *Field, v interface{}) {
 // for example: "name = ?", or "age >= ?".
 func (p *Parser) fmtOp(field string, op Op) string {
 	colName := p.colName(field)
-	return colName + " " + op.SQL() + " ?"
+	return colName + " " + p.GetDBOp(op) + " ?"
 }
 
 // colName formats the query field to database column name in cases the user configured a custom
@@ -608,7 +675,7 @@ func validateUInt(v interface{}) error {
 }
 
 // validate that the underlined element of this interface is a "datetime" string.
-func validateTime(layout string) func(interface{}) error {
+func validateTime(layout string) Validator {
 	return func(v interface{}) error {
 		s, ok := v.(string)
 		if !ok {
