@@ -105,8 +105,8 @@ func (p ParseError) Error() string {
 }
 
 // field is a configuration of a struct field.
-type field struct {
-	// Name of the field.
+type Field struct {
+	// Name of the column.
 	Name string
 	// name of the column.
 	Column string
@@ -126,7 +126,7 @@ type field struct {
 // It is safe for concurrent use by multiple goroutines except for configuration changes.
 type Parser struct {
 	Config
-	fields map[string]*field
+	fields map[string]*Field
 }
 
 // NewParser creates a new Parser. it fails if the configuration is invalid.
@@ -136,10 +136,27 @@ func NewParser(c Config) (*Parser, error) {
 	}
 	p := &Parser{
 		Config: c,
-		fields: make(map[string]*field),
+		fields: make(map[string]*Field),
 	}
 	if err := p.init(); err != nil {
 		return nil, err
+	}
+	return p, nil
+}
+
+// Does not use config.Model, gets config from Fields)
+func NewParserF(c Config, fields []*Field) (*Parser, error) {
+	if err := c.defaults(); err != nil {
+		return nil, err
+	}
+
+	m := make(map[string]*Field, len(fields))
+	for _, v := range fields {
+		m[v.Name] = v
+	}
+	p := &Parser{
+		Config: c,
+		fields: m,
 	}
 	return p, nil
 }
@@ -197,6 +214,14 @@ func (p *Parser) ParseQuery(q *Query) (pr *Params, err error) {
 	pr.Select = strings.Join(q.Select, ", ")
 	parseStatePool.Put(ps)
 	return
+}
+
+func (p *Parser) GetFields() []*Field {
+	fields := make([]*Field, 0, len(p.fields))
+	for _, v := range p.fields {
+		fields = append(fields, v)
+	}
+	return fields
 }
 
 // Column is the default function that converts field name into a database column.
@@ -258,8 +283,10 @@ func (p *Parser) init() error {
 // parseField parses the given struct field tag, and add a rule
 // in the parser according to its type and the options that were set on the tag.
 func (p *Parser) parseField(sf reflect.StructField) error {
-	f := &field{
+
+	f := &Field{
 		Column:    p.ColumnFn(sf.Name),
+		Name:      "",
 		CovertFn:  valueFn,
 		FilterOps: make(map[string]bool),
 	}
@@ -452,7 +479,7 @@ func (p *parseState) relOp(op Op, terms []interface{}) {
 	}
 }
 
-func (p *parseState) field(f *field, v interface{}) {
+func (p *parseState) field(f *Field, v interface{}) {
 	terms, ok := v.(map[string]interface{})
 	// default equality check.
 	if !ok {
