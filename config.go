@@ -12,17 +12,23 @@ type Direction byte
 
 // Operators that support by rql.
 const (
-	ASC  = Direction('+')
-	DESC = Direction('-')
-	EQ   = Op("eq")   // =
-	NEQ  = Op("neq")  // <>
-	LT   = Op("lt")   // <
-	GT   = Op("gt")   // >
-	LTE  = Op("lte")  // <=
-	GTE  = Op("gte")  // >=
-	LIKE = Op("like") // LIKE "PATTERN"
-	OR   = Op("or")   // disjunction
-	AND  = Op("and")  // conjunction
+	ASC      = Direction('+')
+	DESC     = Direction('-')
+	EQ       = Op("eq")   // =
+	NEQ      = Op("neq")  // <>
+	LT       = Op("lt")   // <
+	GT       = Op("gt")   // >
+	LTE      = Op("lte")  // <=
+	GTE      = Op("gte")  // >=
+	LIKE     = Op("like") // LIKE "PATTERN"
+	OR       = Op("or")   // disjunction
+	AND      = Op("and")  // conjunction
+	IN       = Op("in")   // any for slices
+	NIN      = Op("nin")
+	ALL      = Op("all")
+	OVERLAP  = Op("overlap")
+	CONTAINS = Op("contains")
+	EXISTS   = Op("exists")
 )
 
 // Default values for configuration.
@@ -42,19 +48,25 @@ var (
 	// sorting direction, ascending or descending. For example, '+field' or '-field'.
 	// If the predicate is missing or empty then it defaults to '+'
 	sortDirection = map[Direction]string{
-		ASC:  "asc",
-		DESC: "desc",
+		ASC:  "ASC",
+		DESC: "DESC",
 	}
 	opFormat = map[Op]string{
-		EQ:   "=",
-		NEQ:  "<>",
-		LT:   "<",
-		GT:   ">",
-		LTE:  "<=",
-		GTE:  ">=",
-		LIKE: "LIKE",
-		OR:   "OR",
-		AND:  "AND",
+		EQ:       "=",
+		NEQ:      "<>",
+		LT:       "<",
+		GT:       ">",
+		LTE:      "<=",
+		GTE:      ">=",
+		LIKE:     "ILIKE",
+		OR:       "OR",
+		AND:      "AND",
+		IN:       "IN",
+		NIN:      "NOT IN",
+		ALL:      "@>",
+		OVERLAP:  "&&",
+		CONTAINS: "@>",
+		EXISTS:   "?|",
 	}
 )
 
@@ -158,7 +170,7 @@ type Config struct {
 	// It defaults to an empty string slice.
 	DefaultSort []string
 	// Lets the user define how a rql op is translated to a db op.
-	GetDBOp func(Op) string
+	GetDBOp func(Op, *Field) string
 	// Lets the user define how a rql dir ('+','-') is translated to a db direction.
 	GetDBDir func(Direction) string
 	// Sets the validator function based on the type
@@ -184,7 +196,7 @@ func (c *Config) defaults() error {
 		c.ColumnFn = Column
 	}
 	if c.GetDBOp == nil {
-		c.GetDBOp = func(o Op) string {
+		c.GetDBOp = func(o Op, _ *Field) string {
 			return opFormat[o]
 		}
 	}

@@ -2,7 +2,9 @@ package rql
 
 import (
 	"database/sql"
+	"fmt"
 	"reflect"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -981,7 +983,45 @@ func TestParse(t *testing.T) {
 					}
 				}{},
 				FieldSep: ".",
-				GetDBOp: func(o Op) string {
+				GetDBOp: func(o Op, f *Field) string {
+					if o == EQ {
+						return "eq"
+					}
+					return opFormat[o]
+
+				},
+				GetDBDir: func(d Direction) string {
+					if d == ASC {
+						return "ASC"
+					}
+					return "DESC"
+				},
+			},
+			input: []byte(`{
+				"filter": {
+					"id": "id",
+					"full_name": "full_name",
+					"http_url": "http_url",
+					"nested_struct.uuid": "uuid"
+				}
+			}`),
+			wantOut: &Params{
+				Limit:      25,
+				FilterExp:  "id eq ? AND full_name eq ? AND http_url eq ? AND nested_struct_uuid eq ?",
+				FilterArgs: []interface{}{"id", "full_name", "http_url", "uuid"},
+				Sort:       "",
+			},
+		},
+		{
+			name: "custom conv/val func",
+			conf: Config{
+				Model: struct {
+					IDs      []string               `rql:"filter"`
+					Map      map[string]interface{} `rql:"filter"`
+					AliasMap StructAlias            `rql:"filter"`
+				}{},
+				FieldSep: ".",
+				GetDBOp: func(o Op, f *Field) string {
 					if o == EQ {
 						return "eq"
 					}
@@ -1048,31 +1088,10 @@ func assertParams(t *testing.T, got *Params, want *Params) {
 	if !equalExp(got.FilterExp, want.FilterExp) || !equalExp(want.FilterExp, got.FilterExp) {
 		t.Fatalf("filter expr:\n\tgot: %q\n\twant %q", got.FilterExp, want.FilterExp)
 	}
-	if !equalArgs(got.FilterArgs, got.FilterArgs) || !equalArgs(want.FilterArgs, got.FilterArgs) {
-		t.Fatalf("filter args:\n\tgot: %v\n\twant %v", got.FilterArgs, want.FilterArgs)
+	err := deepEqualIgnoreOrder(got.FilterArgs, want.FilterArgs)
+	if err != nil {
+		t.Fatalf("filter expr:\n\tgot: %v\n\twant %v.\n%v", got.FilterArgs, want.FilterArgs, err.Error())
 	}
-}
-
-func equalArgs(a, b []interface{}) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	seen := make([]bool, len(b))
-	for _, arg1 := range a {
-		var found bool
-		for i, arg2 := range b {
-			// skip values that matched before.
-			if !seen[i] && reflect.DeepEqual(arg1, arg2) {
-				seen[i] = true
-				found = true
-				break
-			}
-		}
-		if !found {
-			return false
-		}
-	}
-	return true
 }
 
 func equalExp(e1, e2 string) bool {
@@ -1171,4 +1190,101 @@ func assertFieldsEqual(t *testing.T, got []*Field, want []*Field) {
 			t.Fatalf("Name got:%v want: %v", got[i].Name, want[i].Name)
 		}
 	}
+}
+
+type StructAlias map[string]interface{}
+
+func TestParse2(t *testing.T) {
+	tests := []struct {
+		name    string
+		conf    Config
+		input   []byte
+		wantErr bool
+		wantOut *Params
+	}{
+		{
+
+			name: "custom conv/val func",
+			conf: Config{
+				Model: struct {
+					IDs      []string               `rql:"filter,name=ids,column=ids"`
+					StrSl    []string               `rql:"filter,name=strSl,column=str_sl"`
+					Inty     int                    `rql:"filter,name=inty,column=inty"`
+					IntSl    []int                  `rql:"filter,name=intSl,column=int_sl"`
+					Floats   []float64              `rql:"filter,name=floats,column=floats"`
+					Map      map[string]interface{} `rql:"filter,name=map,column=map"`
+					AliasMap StructAlias            `rql:"filter,name=aliasMap,column=alias_map"`
+				}{},
+				FieldSep: ".",
+				GetDBOp: func(o Op, f *Field) string {
+					return opFormat[o]
+				},
+			},
+			input: []byte(`{
+				"filter": {
+					"floats" :{"$overlap":[1.2,3.2,1]},
+					"map" : {"$contains": {"key":{"someobject":"fdf"}}},
+					"aliasMap" : {"$exists": "str"},
+					"ids": ["1"],
+					"inty": {"$in":[2]},
+					"intSl": {"$all":[1,2]}
+				}
+				}`),
+			wantOut: &Params{
+				Limit:     25,
+				FilterExp: "map @> ? AND alias_map ?| ? AND ids = ? AND inty IN ? AND int_sl @> ? AND floats && ?",
+				FilterArgs: []interface{}{
+					[]interface{}{1.2, 3.2, float64(1)},
+					map[string]interface{}{"key": map[string]interface{}{"someobject": "fdf"}},
+					"str",
+					[]interface{}{"1"},
+					[]interface{}{2},
+					[]interface{}{1, 2}},
+				Sort: "",
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tt.conf.Log = t.Logf
+			p, err := NewParser(tt.conf)
+			if err != nil {
+				t.Fatalf("failed to build parser: %v", err)
+			}
+			out, err := p.Parse(tt.input)
+			if tt.wantErr != (err != nil) {
+				t.Fatalf("want: %v\ngot:%v\nerr: %v", tt.wantErr, err != nil, err)
+			}
+			assertParams(t, out, tt.wantOut)
+		})
+	}
+}
+
+func deepSort(i interface{}) interface{} {
+	switch reflect.TypeOf(i).Kind() {
+	case reflect.Slice:
+		s := reflect.ValueOf(i)
+		if s.Len() == 0 {
+			return i
+		}
+		newSlice := make([]interface{}, s.Len())
+		for j := 0; j < s.Len(); j++ {
+			newSlice[j] = deepSort(s.Index(j).Interface())
+		}
+		sort.SliceStable(newSlice, func(i, j int) bool {
+			return fmt.Sprint(newSlice[i]) < fmt.Sprint(newSlice[j])
+		})
+		return newSlice
+	default:
+		return i
+	}
+}
+
+func deepEqualIgnoreOrder(a, b interface{}) error {
+	sortedA := deepSort(a)
+	sortedB := deepSort(b)
+	if !reflect.DeepEqual(sortedA, sortedB) {
+		return fmt.Errorf("differences found: A=%v, B=%v", sortedA, sortedB)
+	}
+	return nil
 }
