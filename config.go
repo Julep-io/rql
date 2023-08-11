@@ -174,7 +174,7 @@ type Config struct {
 	// Lets the user define how a rql dir ('+','-') is translated to a db direction.
 	GetDBDir func(Direction) string
 	// Sets the validator function based on the type
-	GetValidateFn func(reflect.Type) Validator
+	GetValidator func(reflect.Type) Validator
 	// Sets the convertor function based on the type
 	GetConverter func(reflect.Type) Converter
 	// Sets the supported operations for that type
@@ -208,8 +208,8 @@ func (c *Config) defaults() error {
 	if c.GetConverter == nil {
 		c.GetConverter = GetConverterFn
 	}
-	if c.GetValidateFn == nil {
-		c.GetValidateFn = GetValidateFn
+	if c.GetValidator == nil {
+		c.GetValidator = GetValidateFn
 	}
 	if c.GetSupportedOps == nil {
 		c.GetSupportedOps = GetSupportedOps

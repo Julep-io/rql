@@ -451,13 +451,15 @@ func (p *Parser) parseField(sf reflect.StructField) error {
 		}
 	}
 
-	f.Type = sf.Type
-	filterOps := GetSupportedOps(f.Type)
+	// t := indirect(sf.Type)
+	t := sf.Type
+	f.Type = t
+	filterOps := p.Config.GetSupportedOps(f.Type)
 	if len(filterOps) == 0 {
 		return fmt.Errorf("rql: field type for %q is not supported", sf.Name)
 	}
-	f.CovertFn = GetConverterFn(f.Type)
-	f.ValidateFn = GetValidateFn(f.Type)
+	f.CovertFn = p.Config.GetConverter(f.Type)
+	f.ValidateFn = p.Config.GetValidator(f.Type)
 
 	for _, op := range filterOps {
 		f.FilterOps[p.op(op)] = true
@@ -486,7 +488,7 @@ func (p *Parser) newParseState() (ps *parseState) {
 		// the average value. Same thing applies to the `values` field below.
 		ps.Buffer = bytes.NewBuffer(make([]byte, 0, 64))
 	}
-	ps.values = []interface{}{}
+	ps.values = make([]interface{}, 0, 8)
 	ps.Parser = p
 	return
 }
@@ -569,8 +571,7 @@ func (p *parseState) field(f *Field, v interface{}) {
 		op := EQ
 		err := f.ValidateFn(op, f.Type, v)
 		must(err, "invalid datatype for field %q", f.Name)
-		sql := p.fmtOp(f, op)
-		p.WriteString(sql)
+		p.WriteString(p.fmtOp(f, op))
 		arg := f.CovertFn(op, f.Type, v)
 		p.values = append(p.values, arg)
 	}
