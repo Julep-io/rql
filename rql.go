@@ -629,7 +629,7 @@ func (p *parseState) fmtOp(f *Field, op Op) string {
 	colName := p.colName(f.Column)
 	// colName := f.Column
 
-	return fmt.Sprintf("%v %v %v", colName, p.GetDBOp(op, f), param)
+	return fmt.Sprintf("%v %v %v", colName, p.GetDBOp(op, f.FieldMeta), param)
 }
 
 // colName formats the query field to database column name in cases the user configured a custom

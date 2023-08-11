@@ -984,7 +984,7 @@ func TestParse(t *testing.T) {
 					}
 				}{},
 				FieldSep: ".",
-				GetDBOp: func(o Op, f *Field) string {
+				GetDBOp: func(o Op, f *FieldMeta) string {
 					if o == EQ {
 						return "eq"
 					}
@@ -1022,7 +1022,7 @@ func TestParse(t *testing.T) {
 					AliasMap StructAlias            `rql:"filter"`
 				}{},
 				FieldSep: ".",
-				GetDBOp: func(o Op, f *Field) string {
+				GetDBOp: func(o Op, f *FieldMeta) string {
 					if o == EQ {
 						return "eq"
 					}
@@ -1302,7 +1302,7 @@ func TestParse2(t *testing.T) {
 					AliasMap StructAlias            `rql:"filter,name=aliasMap,column=alias_map"`
 				}{},
 				FieldSep: ".",
-				GetDBOp: func(o Op, f *Field) string {
+				GetDBOp: func(o Op, f *FieldMeta) string {
 					return opFormat[o]
 				},
 			},
