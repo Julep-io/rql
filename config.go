@@ -33,13 +33,15 @@ const (
 
 // Default values for configuration.
 const (
-	DefaultTagName  = "rql"
-	DefaultOpPrefix = "$"
-	DefaultFieldSep = "_"
-	DefaultLimit    = 25
-	DefaultMaxLimit = 100
-	Offset          = "offset"
-	Limit           = "limit"
+	DefaultTagName     = "rql"
+	DefaultOpPrefix    = "$"
+	DefaultFieldSep    = "_"
+	DefaultLimit       = 25
+	DefaultMaxLimit    = 100
+	Offset             = "offset"
+	Limit              = "limit"
+	DefaultParamOffset = 1
+	DefaultParamSymbol = "?"
 )
 
 var (
@@ -179,6 +181,14 @@ type Config struct {
 	GetConverter func(reflect.Type) Converter
 	// Sets the supported operations for that type
 	GetSupportedOps func(reflect.Type) []Op
+	// ParamSymbol is the placehold for parameters in the Filter expression the default is '?', postgres for example uses '$'
+	ParamSymbol string
+	// PositionalParams if true will append a numerical suffix to the ParamSymbol, i.e. ?1, ?2, etc.
+	PositionalParams bool
+	// ParamOffset is the zero-based parameter offset added to positional parameters
+	// This allows the parameters to begin at another offeset and useful when the FilterExp falls after other arguments
+	// manually numbered in the SQL statement, the default is 1
+	ParamOffset int
 }
 
 // defaults sets the default configuration of Config.
@@ -214,11 +224,14 @@ func (c *Config) defaults() error {
 	if c.GetSupportedOps == nil {
 		c.GetSupportedOps = GetSupportedOps
 	}
+
 	defaultString(&c.TagName, DefaultTagName)
 	defaultString(&c.OpPrefix, DefaultOpPrefix)
 	defaultString(&c.FieldSep, DefaultFieldSep)
 	defaultInt(&c.DefaultLimit, DefaultLimit)
 	defaultInt(&c.LimitMaxValue, DefaultMaxLimit)
+	defaultString(&c.ParamSymbol, DefaultParamSymbol)
+	defaultInt(&c.ParamOffset, DefaultParamOffset)
 	return nil
 }
 

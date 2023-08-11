@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode"
 )
 
 func TestInit(t *testing.T) {
@@ -1085,7 +1086,7 @@ func assertParams(t *testing.T, got *Params, want *Params) {
 	if got.Select != want.Select {
 		t.Fatalf("select: got: %q want %q", got.Select, want.Select)
 	}
-	if !equalExp(got.FilterExp, want.FilterExp) || !equalExp(want.FilterExp, got.FilterExp) {
+	if !equalExp(got.FilterExp, want.FilterExp, got.ParamSymbol, got.PositionalParams) || !equalExp(want.FilterExp, got.FilterExp, want.ParamSymbol, want.PositionalParams) {
 		t.Fatalf("filter expr:\n\tgot: %q\n\twant %q", got.FilterExp, want.FilterExp)
 	}
 	err := deepEqualIgnoreOrder(got.FilterArgs, want.FilterArgs)
@@ -1094,14 +1095,17 @@ func assertParams(t *testing.T, got *Params, want *Params) {
 	}
 }
 
-func equalExp(e1, e2 string) bool {
-	s1, s2 := split(e1), split(e2)
+func equalExp(e1, e2 string, pexp string, pos bool) bool {
+	if pexp == "" {
+		pexp = "?"
+	}
+	s1, s2 := split(e1, pexp, pos), split(e2, pexp, pos)
 	for i := range s1 {
 		var found bool
 		for j := range s2 {
 			// if it is a start of conjunction.
 			if s1[i][0] == '(' && s2[j][0] == '(' {
-				found = equalExp(s1[i][1:len(s1[i])-1], s2[j][1:len(s2[j])-1])
+				found = equalExp(s1[i][1:len(s1[i])-1], s2[j][1:len(s2[j])-1], pexp, pos)
 			} else {
 				found = s1[i] == s2[j]
 			}
@@ -1116,7 +1120,7 @@ func equalExp(e1, e2 string) bool {
 	return true
 }
 
-func split(e string) []string {
+func split(e string, pexp string, pos bool) []string {
 	var s []string
 	for len(e) > 0 {
 		if e[0] == '(' {
@@ -1124,7 +1128,18 @@ func split(e string) []string {
 			s = append(s, e[:end])
 			e = e[end:]
 		} else {
-			end := strings.IndexByte(e, '?') + 1
+			end := strings.IndexByte(e, pexp[0]) + 1
+			if pos {
+				for {
+					if end >= len(e) {
+						break
+					} else if unicode.IsDigit(rune(e[end])) {
+						end++
+					} else {
+						break
+					}
+				}
+			}
 			s = append(s, e[:end])
 			e = e[end:]
 		}
@@ -1203,7 +1218,76 @@ func TestParse2(t *testing.T) {
 		wantOut *Params
 	}{
 		{
-
+			name: "positional parameter symbol test",
+			conf: Config{
+				Model: new(struct {
+					Age     int    `rql:"filter"`
+					Name    string `rql:"filter"`
+					Address string `rql:"filter"`
+					Other   string
+				}),
+				ParamSymbol:      "$",
+				PositionalParams: true,
+				DefaultLimit:     25,
+			},
+			input: []byte(`{
+				"filter": {
+					"name": "foo",
+					"age": 12,
+					"$or": [
+						{ "address": "DC" },
+						{ "address": "Marvel" }
+					],
+					"$and": [
+						{ "age": { "$neq": 10} },
+						{ "age": { "$neq": 20} },
+						{ "$or": [{ "age": 11 }, {"age": 10}] }
+					]
+				}
+			}`),
+			wantOut: &Params{
+				Limit:            25,
+				FilterExp:        "name = $1 AND age = $2 AND (address = $3 OR address = $4) AND (age <> $5 AND age <> $6 AND (age = $7 OR age = $8))",
+				FilterArgs:       []interface{}{"foo", 12, "DC", "Marvel", 10, 20, 11, 10},
+				ParamSymbol:      "$",
+				PositionalParams: true,
+			},
+		},
+		{
+			name: "alternate parameter symbol test",
+			conf: Config{
+				Model: struct {
+					Age     int    `rql:"filter"`
+					Name    string `rql:"filter"`
+					Address string `rql:"filter"`
+					Other   string
+				}{},
+				ParamSymbol:  "@",
+				DefaultLimit: 25,
+			},
+			input: []byte(`{
+				"filter": {
+					"name": "foo",
+					"age": 12,
+					"$or": [
+						{ "address": "DC" },
+						{ "address": "Marvel" }
+					],
+					"$and": [
+						{ "age": { "$neq": 10} },
+						{ "age": { "$neq": 20} },
+						{ "$or": [{ "age": 11 }, {"age": 10}] }
+					 ]
+					}
+				}`),
+			wantOut: &Params{
+				Limit:       25,
+				FilterExp:   "name = @ AND age = @ AND (address = @ OR address = @) AND (age <> @ AND age <> @ AND (age = @ OR age = @))",
+				FilterArgs:  []interface{}{"foo", 12, "DC", "Marvel", 10, 20, 11, 10},
+				ParamSymbol: "@",
+			},
+		},
+		{
 			name: "custom conv/val func",
 			conf: Config{
 				Model: struct {
