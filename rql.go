@@ -108,11 +108,18 @@ func (p ParseError) Error() string {
 	return p.msg
 }
 
-type Validator func(Op, reflect.Type, interface{}) error
-type Converter func(Op, reflect.Type, interface{}) interface{}
+type Validator func(Op, FieldMeta, interface{}) error
+type Converter func(Op, FieldMeta, interface{}) interface{}
 
 // field is a configuration of a struct field.
 type Field struct {
+	*FieldMeta
+	// Validation for the type. for example, unit8 greater than or equal to 0.
+	ValidateFn Validator
+	// ConvertFn converts the given value to the type value.
+	CovertFn Converter
+}
+type FieldMeta struct {
 	// Name of the column.
 	Name string
 	// name of the column.
@@ -129,6 +136,8 @@ type Field struct {
 	CovertFn Converter
 	// Type of the field
 	Type reflect.Type
+	// Time layout
+	Layout string
 }
 
 // A Parser parses various types. The result from the Parse method is a Param object.
@@ -258,8 +267,8 @@ func Column(s string) string {
 	return b.String()
 }
 
-func GetSupportedOps(t reflect.Type) []Op {
-	t = indirect(t)
+func GetSupportedOps(f *FieldMeta) []Op {
+	t := f.Type
 	switch t.Kind() {
 	case reflect.Bool:
 		return []Op{EQ, NEQ}
@@ -298,8 +307,9 @@ func GetSupportedOps(t reflect.Type) []Op {
 	}
 }
 
-func GetConverterFn(t reflect.Type) Converter {
-	layout := ""
+func GetConverterFn(f *FieldMeta) Converter {
+	layout := f.Layout
+	t := f.Type
 	switch t.Kind() {
 	case reflect.Bool:
 		return valueFn
@@ -336,8 +346,9 @@ func GetConverterFn(t reflect.Type) Converter {
 	return valueFn
 }
 
-func GetValidateFn(t reflect.Type) Validator {
-	layout := ""
+func GetValidateFn(f *FieldMeta) Validator {
+	t := f.Type
+	layout := f.Layout
 	switch t.Kind() {
 	case reflect.Bool:
 		return validateBool
@@ -415,10 +426,12 @@ func (p *Parser) init() error {
 // in the parser according to its type and the options that were set on the tag.
 func (p *Parser) parseField(sf reflect.StructField) error {
 	f := &Field{
-		Column:    p.ColumnFn(sf.Name),
-		Name:      "",
-		CovertFn:  valueFn,
-		FilterOps: make(map[string]bool),
+		FieldMeta: &FieldMeta{
+			Column:    p.ColumnFn(sf.Name),
+			Name:      "",
+			FilterOps: make(map[string]bool),
+		},
+		CovertFn: valueFn,
 	}
 	layout := time.RFC3339
 	opts := strings.Split(sf.Tag.Get(p.TagName), ",")
@@ -449,6 +462,8 @@ func (p *Parser) parseField(sf reflect.StructField) error {
 			p.Log("Ignoring unknown option %q in struct tag", opt)
 		}
 	}
+	f.Layout = layout
+
 	if f.Name == "" {
 		if p.NameFn != nil {
 			f.Name = p.NameFn(sf.Name)
@@ -457,15 +472,13 @@ func (p *Parser) parseField(sf reflect.StructField) error {
 		}
 	}
 
-	// t := indirect(sf.Type)
-	t := sf.Type
-	f.Type = t
-	filterOps := p.Config.GetSupportedOps(f.Type)
+	f.Type = indirect(sf.Type)
+	filterOps := p.Config.GetSupportedOps(f.FieldMeta)
 	if len(filterOps) == 0 {
 		return fmt.Errorf("rql: field type for %q is not supported", sf.Name)
 	}
-	f.CovertFn = p.Config.GetConverter(f.Type)
-	f.ValidateFn = p.Config.GetValidator(f.Type)
+	f.CovertFn = p.Config.GetConverter(f.FieldMeta)
+	f.ValidateFn = p.Config.GetValidator(f.FieldMeta)
 
 	for _, op := range filterOps {
 		f.FilterOps[p.op(op)] = true
@@ -577,10 +590,10 @@ func (p *parseState) field(f *Field, v interface{}) {
 	// default equality check.
 	if !ok {
 		op := EQ
-		err := f.ValidateFn(op, f.Type, v)
+		err := f.ValidateFn(op, *f.FieldMeta, v)
 		must(err, "invalid datatype for field %q", f.Name)
 		p.WriteString(p.fmtOp(f, op))
-		arg := f.CovertFn(op, f.Type, v)
+		arg := f.CovertFn(op, *f.FieldMeta, v)
 		p.values = append(p.values, arg)
 	}
 	var i int
@@ -593,9 +606,9 @@ func (p *parseState) field(f *Field, v interface{}) {
 		}
 		op := Op(opName[1:])
 		expect(f.FilterOps[opName], "can not apply op %q on field %q", opName, f.Name)
-		must(f.ValidateFn(op, f.Type, opVal), "invalid datatype or format for field %q", f.Name)
+		must(f.ValidateFn(op, *f.FieldMeta, opVal), "invalid datatype or format for field %q", f.Name)
 		p.WriteString(p.fmtOp(f, op))
-		arg := f.CovertFn(op, f.Type, opVal)
+		arg := f.CovertFn(op, *f.FieldMeta, opVal)
 		p.values = append(p.values, arg)
 		i++
 	}
@@ -613,7 +626,8 @@ func (p *parseState) fmtOp(f *Field, op Op) string {
 	}
 	p.argN++
 
-	colName := f.Column
+	colName := p.colName(f.Column)
+	// colName := f.Column
 
 	return fmt.Sprintf("%v %v %v", colName, p.GetDBOp(op, f), param)
 }
@@ -666,7 +680,7 @@ func errorType(v interface{}, expected string) error {
 }
 
 // validate that the underlined element of given interface is a boolean.
-func validateBool(op Op, t reflect.Type, v interface{}) error {
+func validateBool(op Op, f FieldMeta, v interface{}) error {
 	if _, ok := v.(bool); !ok {
 		return errorType(v, "bool")
 	}
@@ -691,7 +705,7 @@ func validateSliceElem(v interface{}, expectedElemType reflect.Type) error {
 }
 
 // validate that the underlined element of given interface is a string.
-func validateString(op Op, t reflect.Type, v interface{}) error {
+func validateString(op Op, f FieldMeta, v interface{}) error {
 	if op == IN || op == NIN {
 		validateSliceElem(v, reflect.TypeOf(""))
 	}
@@ -702,7 +716,7 @@ func validateString(op Op, t reflect.Type, v interface{}) error {
 }
 
 // validate that the underlined element of given interface is a float.
-func validateFloat(op Op, t reflect.Type, v interface{}) error {
+func validateFloat(op Op, f FieldMeta, v interface{}) error {
 	if op == IN || op == NIN {
 		return validateSliceElem(v, reflect.TypeOf(1.1))
 	}
@@ -713,7 +727,7 @@ func validateFloat(op Op, t reflect.Type, v interface{}) error {
 }
 
 // validate that the underlined element of given interface is an int.
-func validateInt(op Op, t reflect.Type, v interface{}) error {
+func validateInt(op Op, f FieldMeta, v interface{}) error {
 	if op == IN || op == NIN {
 		return validateSliceElem(v, reflect.TypeOf(1.1))
 	}
@@ -728,11 +742,11 @@ func validateInt(op Op, t reflect.Type, v interface{}) error {
 }
 
 // validate that the underlined element of given interface is an int and greater than 0.
-func validateUInt(op Op, t reflect.Type, v interface{}) error {
+func validateUInt(op Op, f FieldMeta, v interface{}) error {
 	if op == IN || op == NIN {
 		return validateSliceElem(v, reflect.TypeOf(1.1))
 	}
-	if err := validateInt(op, t, v); err != nil {
+	if err := validateInt(op, f, v); err != nil {
 		return err
 	}
 	if v.(float64) < 0 {
@@ -743,7 +757,7 @@ func validateUInt(op Op, t reflect.Type, v interface{}) error {
 
 // validate that the underlined element of this interface is a "datetime" string.
 func validateTime(layout string) Validator {
-	return func(_ Op, _ reflect.Type, v interface{}) error {
+	return func(_ Op, _ FieldMeta, v interface{}) error {
 		s, ok := v.(string)
 		if !ok {
 			return errorType(v, "string")
@@ -754,7 +768,7 @@ func validateTime(layout string) Validator {
 }
 
 // convert float to int.
-func convertInt(op Op, t reflect.Type, v interface{}) interface{} {
+func convertInt(op Op, f FieldMeta, v interface{}) interface{} {
 	if op == IN || op == NIN {
 		sl, ok := v.([]interface{})
 		if !ok {
@@ -769,7 +783,8 @@ func convertInt(op Op, t reflect.Type, v interface{}) interface{} {
 	return int(v.(float64))
 }
 
-func convertSlice(op Op, t reflect.Type, v interface{}) interface{} {
+func convertSlice(op Op, f FieldMeta, v interface{}) interface{} {
+	t := f.Type
 	if isNumeric(t.Elem()) {
 		switch t.Elem().Kind() {
 		case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
@@ -806,7 +821,8 @@ func isComparable(t reflect.Type, t2 reflect.Type) bool {
 	return t == t2 || (isNumeric(t) && isNumeric(t2))
 }
 
-func validateSliceOp(op Op, t reflect.Type, v interface{}) error {
+func validateSliceOp(op Op, f FieldMeta, v interface{}) error {
+	t := f.Type
 	if t.Kind() != reflect.Slice {
 		return fmt.Errorf("t is not a slice, wrong validate func")
 	}
@@ -818,7 +834,7 @@ func validateSliceOp(op Op, t reflect.Type, v interface{}) error {
 	return validateSliceElem(v, t.Elem())
 }
 
-func validateMapOp(op Op, t reflect.Type, v interface{}) error {
+func validateMapOp(op Op, f FieldMeta, v interface{}) error {
 	if op == EXISTS {
 		_, ok := v.(string)
 		if !ok {
@@ -835,15 +851,15 @@ func validateMapOp(op Op, t reflect.Type, v interface{}) error {
 }
 
 // convert string to time object.
-func convertTime(layout string) func(Op, reflect.Type, interface{}) interface{} {
-	return func(_ Op, _ reflect.Type, v interface{}) interface{} {
+func convertTime(layout string) func(Op, FieldMeta, interface{}) interface{} {
+	return func(_ Op, _ FieldMeta, v interface{}) interface{} {
 		t, _ := time.Parse(layout, v.(string))
 		return t
 	}
 }
 
 // nop converter.
-func valueFn(op Op, t reflect.Type, v interface{}) interface{} {
+func valueFn(op Op, f FieldMeta, v interface{}) interface{} {
 	return v
 }
 

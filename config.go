@@ -176,11 +176,11 @@ type Config struct {
 	// Lets the user define how a rql dir ('+','-') is translated to a db direction.
 	GetDBDir func(Direction) string
 	// Sets the validator function based on the type
-	GetValidator func(reflect.Type) Validator
+	GetValidator func(f *FieldMeta) Validator
 	// Sets the convertor function based on the type
-	GetConverter func(reflect.Type) Converter
+	GetConverter func(f *FieldMeta) Converter
 	// Sets the supported operations for that type
-	GetSupportedOps func(reflect.Type) []Op
+	GetSupportedOps func(f *FieldMeta) []Op
 	// ParamSymbol is the placehold for parameters in the Filter expression the default is '?', postgres for example uses '$'
 	ParamSymbol string
 	// PositionalParams if true will append a numerical suffix to the ParamSymbol, i.e. ?1, ?2, etc.
