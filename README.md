@@ -18,19 +18,28 @@ RQL is a resource query language for REST. It provides a simple and light-weight
   <img src="assets/diagram.png" alt="rql diagram">
 </p>
 
+## FORK STATUS
+
+This is a fork pending the following PRs:
+
+- [support custom ops](https://github.com/a8m/rql/pull/51)
+- [expose field object publicly](https://github.com/a8m/rql/pull/52)
+- [add custom field name support (NameFn)](https://github.com/a8m/rql/pull/50)
+- [Positional Parameter Support](https://github.com/a8m/rql/pull/30)
+
 ## Motivation
 In the last several years I have found myself working on different web applications in Go, some of them were small and some of them were big with a lot of entities and relations. In all cases I never found a simple and standard API to query my resources.
 
-What do I mean by query? Let's say our application has a table of `orders`, and we want our users to be able to search and __filter by dynamic parameters__. For example: _select all orders from today with price greater than 100_.  
-In order to achieve that I used to pass these parameters in the query string like this: `created_at_gt=X&price_gt=100`.  
+What do I mean by query? Let's say our application has a table of `orders`, and we want our users to be able to search and __filter by dynamic parameters__. For example: _select all orders from today with price greater than 100_.
+In order to achieve that I used to pass these parameters in the query string like this: `created_at_gt=X&price_gt=100`.
 But sometimes it became complicated when I needed to apply a disjunction between two conditions. For example, when I wanted to _select all orders that canceled or created last week and still didn't ship_. And in SQL syntax:
 ```sql
 SELECT * FROM ORDER WHERE canceled = 1 OR (created_at < X AND created_at > Y AND shipped = 0)
-```  
+```
 I was familiar with the MongoDB syntax and I felt that it was simple and robust enough to achieve my goals, and decided to use it as the query language for this project. I wanted it to be project agnostic in the sense of not relying on anything that related to some specific application or resource. Therefore, in order to embed rql in a new project, a user just needs to import the package and add the desired tags to his struct definition. Follow the [Getting Started](#Getting_Started) section to learn more.
 
 ## Getting Started
-rql uses a subset of MongoDB query syntax. If you are familiar with the MongoDB syntax, it will be easy for you to start. Although, it's pretty simple and easy to learn.    
+rql uses a subset of MongoDB query syntax. If you are familiar with the MongoDB syntax, it will be easy for you to start. Although, it's pretty simple and easy to learn.
 In order to embed rql you simply need to add the tags you want (`filter` or `sort`) to your struct definition, and rql will manage all validations for you and return an informative error for the end user if the query doesn't follow the schema.
 Here's a short example of how to start using rql quickly, or you can go to [API](#API) for more expanded documentation.
 ```go
@@ -106,7 +115,7 @@ Go to [examples/simple](examples/simple.go) to see the full working example.
 
 
 ## API
-In order to start using rql, you need to configure your parser. Let's go over a basic example of how to do this. For more details and updated documentation, please checkout the [godoc](https://godoc.org/github.com/a8m/rql/#Config).  
+In order to start using rql, you need to configure your parser. Let's go over a basic example of how to do this. For more details and updated documentation, please checkout the [godoc](https://godoc.org/github.com/a8m/rql/#Config).
 There are two options to build a parser, `rql.New(rql.Config)`, and `rql.MustNew(rql.Config)`. The only difference between the two is that `rql.New` returns an error if the configuration is invalid, and `rql.MustNew` panics.
 ```go
 // we use rql.MustPanic because we don't want to deal with error handling in top level declarations.
@@ -139,12 +148,12 @@ Let's go over the validation rules:
 		T2 time.Time `rql:"filter,layout=UnixDate"`         // time.UnixDate
 		T3 time.Time `rql:"filter,layout=2006-01-02 15:04"` // 2006-01-02 15:04 (custom)
    }
-   ```  
+   ```
 
 Note that all rules are applied to pointers as well. It means, if you have a field `Name *string` in your struct, we still use the string validation rule for it.
 
 ### User API
-We consider developers as the users of this API (usually FE developers). Let's go over the JSON API we export for resources.  
+We consider developers as the users of this API (usually FE developers). Let's go over the JSON API we export for resources.
 The top-level query accepts JSON with 4 fields: `offset`, `limit`, `filter` and `sort`. All of them are optional.
 
 #### `offset` and `limit`
@@ -175,11 +184,11 @@ Filter is the one who is translated to the SQL `WHERE` clause. This object that 
   {
     "admin": true
   }
-  
+
   Result is: admin = ?
   ```
   You can see that RQL uses placeholders in the generated `WHERE` statement. Follow the [examples](#examples) section
-  to see how to use it properly. 
+  to see how to use it properly.
 - If the field follows the format: `field: { <predicate>: <value>, ...}`, For example:
   ```
   For input:
@@ -189,7 +198,7 @@ Filter is the one who is translated to the SQL `WHERE` clause. This object that 
       "$lt": 30
     }
   }
-  
+
   Result is: age > ? AND age < ?
   ```
   It means that the logical `AND` operator used between the two predicates.
@@ -204,7 +213,7 @@ Filter is the one who is translated to the SQL `WHERE` clause. This object that 
       { "zip": { "$gte": 49800, "$lte": 57080 } }
     ]
   }
-  
+
   Result is: city = ? OR (zip >= ? AND zip <= ?)
   ```
 To simplify that, the rule is `AND` for objects and `OR` for arrays. Let's go over the list of supported predicates and then we'll show a few examples.
@@ -235,7 +244,7 @@ var QueryParser = rql.MustNewParser(rql.Config{
 	FieldSep: 	".",
 	LimitMaxValue:	25,
 })
-	
+
 type User struct {
 	ID          uint      `gorm:"primary_key" rql:"filter,sort"`
 	Admin       bool      `rql:"filter"`
@@ -360,7 +369,7 @@ The performance of RQL looks pretty good, but there is always a room for improve
 | Medium              |    6030        |   3100     |   64           |
 | Large               |    14726       |   7625     |   148          |
 
-I ran fuzzy testing using `go-fuzz` and I didn't see any crashes. You are welcome to run by yourself and find potential failures. 
+I ran fuzzy testing using `go-fuzz` and I didn't see any crashes. You are welcome to run by yourself and find potential failures.
 
 ## LICENSE
 I am providing code in the repository to you under MIT license. Because this is my personal repository, the license you receive to my code is from me and not my employer (Facebook)
