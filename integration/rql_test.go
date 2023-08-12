@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/a8m/rql"
+	"github.com/ashtonian/rql"
 	_ "github.com/go-sql-driver/mysql"
 	"github.com/jinzhu/gorm"
 )
