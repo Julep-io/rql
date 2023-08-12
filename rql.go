@@ -130,10 +130,6 @@ type FieldMeta struct {
 	Filterable bool
 	// All supported operators for this field.
 	FilterOps map[string]bool
-	// Validation for the type. for example, unit8 greater than or equal to 0.
-	ValidateFn Validator
-	// ConvertFn converts the given value to the type value.
-	CovertFn Converter
 	// Type of the field
 	Type reflect.Type
 	// Time layout

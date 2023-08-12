@@ -1170,12 +1170,12 @@ func TestGetFields(t *testing.T) {
 			wantOut: []*Field{
 				&Field{
 					FieldMeta: &FieldMeta{
-						Name: "some_name",
-						// Column:     "some_name",
+						Name:       "some_name",
 						Sortable:   false,
 						Filterable: true,
-						// AvailableOps: []string{"$eq", "$neq", "$lt", "$lte", "$gt", "$gte", "$like"},
 					},
+					// Column:     "some_name",
+					// AvailableOps: []string{"$eq", "$neq", "$lt", "$lte", "$gt", "$gte", "$like"},
 				},
 			},
 		},
