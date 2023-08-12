@@ -12,12 +12,6 @@
 	</a>
 </p>
 
-RQL is a resource query language for REST. It provides a simple and light-weight API for adding dynamic querying capabilities to web-applications that use SQL-based database. It functions as the connector between the HTTP handler and the DB engine, and manages all validations and translations for user inputs.
-
-<p align="center">
-  <img src="assets/diagram.png" alt="rql diagram">
-</p>
-
 ## FORK STATUS
 
 This is a fork pending the following PRs:
@@ -26,6 +20,13 @@ This is a fork pending the following PRs:
 - [expose field object publicly](https://github.com/a8m/rql/pull/52)
 - [add custom field name support (NameFn)](https://github.com/a8m/rql/pull/50)
 - [Positional Parameter Support](https://github.com/a8m/rql/pull/30)
+
+RQL is a resource query language for REST. It provides a simple and light-weight API for adding dynamic querying capabilities to web-applications that use SQL-based database. It functions as the connector between the HTTP handler and the DB engine, and manages all validations and translations for user inputs.
+
+<p align="center">
+  <img src="assets/diagram.png" alt="rql diagram">
+</p>
+
 
 ## Motivation
 In the last several years I have found myself working on different web applications in Go, some of them were small and some of them were big with a lot of entities and relations. In all cases I never found a simple and standard API to query my resources.
