@@ -12,23 +12,17 @@ type Direction byte
 
 // Operators that support by rql.
 const (
-	ASC      = Direction('+')
-	DESC     = Direction('-')
-	EQ       = Op("eq")   // =
-	NEQ      = Op("neq")  // <>
-	LT       = Op("lt")   // <
-	GT       = Op("gt")   // >
-	LTE      = Op("lte")  // <=
-	GTE      = Op("gte")  // >=
-	LIKE     = Op("like") // LIKE "PATTERN"
-	OR       = Op("or")   // disjunction
-	AND      = Op("and")  // conjunction
-	IN       = Op("in")   // any for slices
-	NIN      = Op("nin")
-	ALL      = Op("all")
-	OVERLAP  = Op("overlap")
-	CONTAINS = Op("contains")
-	EXISTS   = Op("exists")
+	ASC  = Direction('+')
+	DESC = Direction('-')
+	EQ   = Op("eq")   // =
+	NEQ  = Op("neq")  // <>
+	LT   = Op("lt")   // <
+	GT   = Op("gt")   // >
+	LTE  = Op("lte")  // <=
+	GTE  = Op("gte")  // >=
+	LIKE = Op("like") // LIKE "PATTERN"
+	OR   = Op("or")   // disjunction
+	AND  = Op("and")  // conjunction
 )
 
 // Default values for configuration.
@@ -50,25 +44,19 @@ var (
 	// sorting direction, ascending or descending. For example, '+field' or '-field'.
 	// If the predicate is missing or empty then it defaults to '+'
 	sortDirection = map[Direction]string{
-		ASC:  "ASC",
-		DESC: "DESC",
+		ASC:  "asc",
+		DESC: "desc",
 	}
 	opFormat = map[Op]string{
-		EQ:       "=",
-		NEQ:      "<>",
-		LT:       "<",
-		GT:       ">",
-		LTE:      "<=",
-		GTE:      ">=",
-		LIKE:     "ILIKE",
-		OR:       "OR",
-		AND:      "AND",
-		IN:       "IN",
-		NIN:      "NOT IN",
-		ALL:      "@>",
-		OVERLAP:  "&&",
-		CONTAINS: "@>",
-		EXISTS:   "?|",
+		EQ:   "=",
+		NEQ:  "<>",
+		LT:   "<",
+		GT:   ">",
+		LTE:  "<=",
+		GTE:  ">=",
+		LIKE: "LIKE",
+		OR:   "OR",
+		AND:  "AND",
 	}
 )
 

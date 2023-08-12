@@ -919,7 +919,7 @@ func TestParse(t *testing.T) {
 			name: "support name struct opt",
 			conf: Config{
 				Model: struct {
-					SomeName string `rql:"filter,name=someName"`
+					SomeName string `rql:"filter,name=someName,column=some_name"`
 				}{},
 			},
 			input: []byte(`{
@@ -955,7 +955,7 @@ func TestParse(t *testing.T) {
 			name: "test nameFn works",
 			conf: Config{
 				Model: struct {
-					SomeName string `rql:"filter"`
+					SomeName string `rql:"filter,name=someName,column=some_name"`
 				}{},
 				NameFn: Column,
 			},
@@ -1014,41 +1014,73 @@ func TestParse(t *testing.T) {
 			},
 		},
 		{
-			name: "custom conv/val func",
+			name: "alternate parameter symbol test",
 			conf: Config{
-				Model: struct {
-					IDs      []string               `rql:"filter"`
-					Map      map[string]interface{} `rql:"filter"`
-					AliasMap StructAlias            `rql:"filter"`
-				}{},
-				FieldSep: ".",
-				GetDBOp: func(o Op, f *FieldMeta) string {
-					if o == EQ {
-						return "eq"
+				Model: new(struct {
+					Age     int    `rql:"filter"`
+					Name    string `rql:"filter"`
+					Address string `rql:"filter"`
+					Other   string
+				}),
+				ParamSymbol:  "@",
+				DefaultLimit: 25,
+			},
+			input: []byte(`{
+					"filter": {
+						"name": "foo",
+						"age": 12,
+						"$or": [
+							{ "address": "DC" },
+							{ "address": "Marvel" }
+						],
+						"$and": [
+							{ "age": { "$neq": 10} },
+							{ "age": { "$neq": 20} },
+							{ "$or": [{ "age": 11 }, {"age": 10}] }
+						]
 					}
-					return opFormat[o]
-
-				},
-				GetDBDir: func(d Direction) string {
-					if d == ASC {
-						return "ASC"
-					}
-					return "DESC"
-				},
+				}`),
+			wantOut: &Params{
+				Limit:       25,
+				FilterExp:   "name = @ AND age = @ AND (address = @ OR address = @) AND (age <> @ AND age <> @ AND (age = @ OR age = @))",
+				FilterArgs:  []interface{}{"foo", 12, "DC", "Marvel", 10, 20, 11, 10},
+				ParamSymbol: "@",
+			},
+		},
+		{
+			name: "positional parameter symbol test",
+			conf: Config{
+				Model: new(struct {
+					Age     int    `rql:"filter"`
+					Name    string `rql:"filter"`
+					Address string `rql:"filter"`
+					Other   string
+				}),
+				ParamSymbol:      "$",
+				PositionalParams: true,
+				DefaultLimit:     25,
 			},
 			input: []byte(`{
 				"filter": {
-					"id": "id",
-					"full_name": "full_name",
-					"http_url": "http_url",
-					"nested_struct.uuid": "uuid"
+					"name": "foo",
+					"age": 12,
+					"$or": [
+						{ "address": "DC" },
+						{ "address": "Marvel" }
+					],
+					"$and": [
+						{ "age": { "$neq": 10} },
+						{ "age": { "$neq": 20} },
+						{ "$or": [{ "age": 11 }, {"age": 10}] }
+					]
 				}
 			}`),
 			wantOut: &Params{
-				Limit:      25,
-				FilterExp:  "id eq ? AND full_name eq ? AND http_url eq ? AND nested_struct_uuid eq ?",
-				FilterArgs: []interface{}{"id", "full_name", "http_url", "uuid"},
-				Sort:       "",
+				Limit:            25,
+				FilterExp:        "name = $1 AND age = $2 AND (address = $3 OR address = $4) AND (age <> $5 AND age <> $6 AND (age = $7 OR age = $8))",
+				FilterArgs:       []interface{}{"foo", 12, "DC", "Marvel", 10, 20, 11, 10},
+				ParamSymbol:      "$",
+				PositionalParams: true,
 			},
 		},
 	}
@@ -1151,6 +1183,7 @@ func split(e string, pexp string, pos bool) []string {
 
 func mustParseTime(layout, s string) time.Time {
 	t, _ := time.Parse(layout, s)
+
 	return t
 }
 
@@ -1209,143 +1242,6 @@ func assertFieldsEqual(t *testing.T, got []*Field, want []*Field) {
 	}
 }
 
-type StructAlias map[string]interface{}
-
-func TestParse2(t *testing.T) {
-	tests := []struct {
-		name    string
-		conf    Config
-		input   []byte
-		wantErr bool
-		wantOut *Params
-	}{
-		{
-			name: "positional parameter symbol test",
-			conf: Config{
-				Model: new(struct {
-					Age     int    `rql:"filter"`
-					Name    string `rql:"filter"`
-					Address string `rql:"filter"`
-					Other   string
-				}),
-				ParamSymbol:      "$",
-				PositionalParams: true,
-				DefaultLimit:     25,
-			},
-			input: []byte(`{
-				"filter": {
-					"name": "foo",
-					"age": 12,
-					"$or": [
-						{ "address": "DC" },
-						{ "address": "Marvel" }
-					],
-					"$and": [
-						{ "age": { "$neq": 10} },
-						{ "age": { "$neq": 20} },
-						{ "$or": [{ "age": 11 }, {"age": 10}] }
-					]
-				}
-			}`),
-			wantOut: &Params{
-				Limit:            25,
-				FilterExp:        "name = $1 AND age = $2 AND (address = $3 OR address = $4) AND (age <> $5 AND age <> $6 AND (age = $7 OR age = $8))",
-				FilterArgs:       []interface{}{"foo", 12, "DC", "Marvel", 10, 20, 11, 10},
-				ParamSymbol:      "$",
-				PositionalParams: true,
-			},
-		},
-		{
-			name: "alternate parameter symbol test",
-			conf: Config{
-				Model: struct {
-					Age     int    `rql:"filter"`
-					Name    string `rql:"filter"`
-					Address string `rql:"filter"`
-					Other   string
-				}{},
-				ParamSymbol:  "@",
-				DefaultLimit: 25,
-			},
-			input: []byte(`{
-				"filter": {
-					"name": "foo",
-					"age": 12,
-					"$or": [
-						{ "address": "DC" },
-						{ "address": "Marvel" }
-					],
-					"$and": [
-						{ "age": { "$neq": 10} },
-						{ "age": { "$neq": 20} },
-						{ "$or": [{ "age": 11 }, {"age": 10}] }
-					 ]
-					}
-				}`),
-			wantOut: &Params{
-				Limit:       25,
-				FilterExp:   "name = @ AND age = @ AND (address = @ OR address = @) AND (age <> @ AND age <> @ AND (age = @ OR age = @))",
-				FilterArgs:  []interface{}{"foo", 12, "DC", "Marvel", 10, 20, 11, 10},
-				ParamSymbol: "@",
-			},
-		},
-		{
-			name: "custom conv/val func",
-			conf: Config{
-				Model: struct {
-					IDs      []string               `rql:"filter,name=ids,column=ids"`
-					StrSl    []string               `rql:"filter,name=strSl,column=str_sl"`
-					Inty     int                    `rql:"filter,name=inty,column=inty"`
-					IntSl    []int                  `rql:"filter,name=intSl,column=int_sl"`
-					Floats   []float64              `rql:"filter,name=floats,column=floats"`
-					Map      map[string]interface{} `rql:"filter,name=map,column=map"`
-					AliasMap StructAlias            `rql:"filter,name=aliasMap,column=alias_map"`
-				}{},
-				FieldSep: ".",
-				GetDBOp: func(o Op, f *FieldMeta) string {
-					return opFormat[o]
-				},
-			},
-			input: []byte(`{
-				"filter": {
-					"floats" :{"$overlap":[1.2,3.2,1]},
-					"map" : {"$contains": {"key":{"someobject":"fdf"}}},
-					"aliasMap" : {"$exists": "str"},
-					"ids": ["1"],
-					"inty": {"$in":[2]},
-					"intSl": {"$all":[1,2]}
-				}
-				}`),
-			wantOut: &Params{
-				Limit:     25,
-				FilterExp: "map @> ? AND alias_map ?| ? AND ids = ? AND inty IN ? AND int_sl @> ? AND floats && ?",
-				FilterArgs: []interface{}{
-					[]interface{}{1.2, 3.2, float64(1)},
-					map[string]interface{}{"key": map[string]interface{}{"someobject": "fdf"}},
-					"str",
-					[]interface{}{"1"},
-					[]interface{}{2},
-					[]interface{}{1, 2}},
-				Sort: "",
-			},
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			tt.conf.Log = t.Logf
-			p, err := NewParser(tt.conf)
-			if err != nil {
-				t.Fatalf("failed to build parser: %v", err)
-			}
-			out, err := p.Parse(tt.input)
-			if tt.wantErr != (err != nil) {
-				t.Fatalf("want: %v\ngot:%v\nerr: %v", tt.wantErr, err != nil, err)
-			}
-			assertParams(t, out, tt.wantOut)
-		})
-	}
-}
-
 func compareInterface(a, b interface{}) bool {
 	// If either of the values is nil, handle them first.
 	if a == nil && b != nil {
@@ -1388,6 +1284,7 @@ func deepEqualIgnoreOrder(a, b interface{}) error {
 	if (a == nil && b != nil) || (a != nil && b == nil) {
 		return fmt.Errorf("differences found: A=%v, B=%v", a, b)
 	}
+
 	sortedA := deepSort(a)
 	sortedB := deepSort(b)
 	if !reflect.DeepEqual(sortedA, sortedB) {

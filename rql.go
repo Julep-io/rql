@@ -269,17 +269,13 @@ func GetSupportedOps(f *FieldMeta) []Op {
 	case reflect.Bool:
 		return []Op{EQ, NEQ}
 	case reflect.String:
-		return []Op{EQ, NEQ, LT, LTE, GT, GTE, LIKE, IN, NIN}
+		return []Op{EQ, NEQ, LT, LTE, GT, GTE, LIKE}
 	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
-		return []Op{EQ, NEQ, LT, LTE, GT, GTE, IN, NIN}
+		return []Op{EQ, NEQ, LT, LTE, GT, GTE}
 	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
-		return []Op{EQ, NEQ, LT, LTE, GT, GTE, IN, NIN}
+		return []Op{EQ, NEQ, LT, LTE, GT, GTE}
 	case reflect.Float32, reflect.Float64:
-		return []Op{EQ, NEQ, LT, LTE, GT, GTE, IN, NIN}
-	case reflect.Slice:
-		return []Op{EQ, NEQ, OVERLAP, ALL}
-	case reflect.Map:
-		return []Op{CONTAINS, EXISTS}
+		return []Op{EQ, NEQ, LT, LTE, GT, GTE}
 	case reflect.Struct:
 		switch v := reflect.Zero(t); v.Interface().(type) {
 		case sql.NullBool:
@@ -317,10 +313,6 @@ func GetConverterFn(f *FieldMeta) Converter {
 		return convertInt
 	case reflect.Float32, reflect.Float64:
 		return valueFn
-	case reflect.Slice:
-		return convertSlice
-	case reflect.Map:
-		return valueFn
 	case reflect.Struct:
 		switch v := reflect.Zero(t); v.Interface().(type) {
 		case sql.NullBool:
@@ -356,10 +348,6 @@ func GetValidateFn(f *FieldMeta) Validator {
 		return validateUInt
 	case reflect.Float32, reflect.Float64:
 		return validateFloat
-	case reflect.Slice:
-		return validateSliceOp
-	case reflect.Map:
-		return validateMapOp
 	case reflect.Struct:
 		switch v := reflect.Zero(t); v.Interface().(type) {
 		case sql.NullBool:
@@ -588,7 +576,7 @@ func (p *parseState) field(f *Field, v interface{}) {
 		op := EQ
 		err := f.ValidateFn(op, *f.FieldMeta, v)
 		must(err, "invalid datatype for field %q", f.Name)
-		p.WriteString(p.fmtOp(f, op))
+		p.WriteString(p.fmtOp(f.FieldMeta, op))
 		arg := f.CovertFn(op, *f.FieldMeta, v)
 		p.values = append(p.values, arg)
 	}
@@ -603,7 +591,7 @@ func (p *parseState) field(f *Field, v interface{}) {
 		op := Op(opName[1:])
 		expect(f.FilterOps[opName], "can not apply op %q on field %q", opName, f.Name)
 		must(f.ValidateFn(op, *f.FieldMeta, opVal), "invalid datatype or format for field %q", f.Name)
-		p.WriteString(p.fmtOp(f, op))
+		p.WriteString(p.fmtOp(f.FieldMeta, op))
 		arg := f.CovertFn(op, *f.FieldMeta, opVal)
 		p.values = append(p.values, arg)
 		i++
@@ -615,7 +603,7 @@ func (p *parseState) field(f *Field, v interface{}) {
 
 // fmtOp create a string for the operation with a placeholder.
 // for example: "name = ?", or "age >= ?".
-func (p *parseState) fmtOp(f *Field, op Op) string {
+func (p *parseState) fmtOp(f *FieldMeta, op Op) string {
 	param := p.ParamSymbol
 	if p.PositionalParams {
 		param = fmt.Sprintf("%s%d", p.ParamSymbol, p.argN+p.ParamOffset)
@@ -623,9 +611,7 @@ func (p *parseState) fmtOp(f *Field, op Op) string {
 	p.argN++
 
 	colName := p.colName(f.Column)
-	// colName := f.Column
-
-	return fmt.Sprintf("%v %v %v", colName, p.GetDBOp(op, f.FieldMeta), param)
+	return fmt.Sprintf("%v %v %v", colName, p.GetDBOp(op, f), param)
 }
 
 // colName formats the query field to database column name in cases the user configured a custom
@@ -683,28 +669,8 @@ func validateBool(op Op, f FieldMeta, v interface{}) error {
 	return nil
 }
 
-func validateSliceElem(v interface{}, expectedElemType reflect.Type) error {
-	slice, ok := v.([]interface{})
-	if !ok {
-		return errorType(v, "array")
-	}
-	for _, item := range slice {
-		it := reflect.TypeOf(item)
-		c := isComparable(expectedElemType, it)
-
-		if !c {
-			t := expectedElemType.Kind().String()
-			return errorType(item, t)
-		}
-	}
-	return nil
-}
-
 // validate that the underlined element of given interface is a string.
 func validateString(op Op, f FieldMeta, v interface{}) error {
-	if op == IN || op == NIN {
-		validateSliceElem(v, reflect.TypeOf(""))
-	}
 	if _, ok := v.(string); !ok {
 		return errorType(v, "string")
 	}
@@ -713,9 +679,6 @@ func validateString(op Op, f FieldMeta, v interface{}) error {
 
 // validate that the underlined element of given interface is a float.
 func validateFloat(op Op, f FieldMeta, v interface{}) error {
-	if op == IN || op == NIN {
-		return validateSliceElem(v, reflect.TypeOf(1.1))
-	}
 	if _, ok := v.(float64); !ok {
 		return errorType(v, "float64")
 	}
@@ -724,9 +687,6 @@ func validateFloat(op Op, f FieldMeta, v interface{}) error {
 
 // validate that the underlined element of given interface is an int.
 func validateInt(op Op, f FieldMeta, v interface{}) error {
-	if op == IN || op == NIN {
-		return validateSliceElem(v, reflect.TypeOf(1.1))
-	}
 	n, ok := v.(float64)
 	if !ok {
 		return errorType(v, "int")
@@ -739,9 +699,6 @@ func validateInt(op Op, f FieldMeta, v interface{}) error {
 
 // validate that the underlined element of given interface is an int and greater than 0.
 func validateUInt(op Op, f FieldMeta, v interface{}) error {
-	if op == IN || op == NIN {
-		return validateSliceElem(v, reflect.TypeOf(1.1))
-	}
 	if err := validateInt(op, f, v); err != nil {
 		return err
 	}
@@ -765,85 +722,7 @@ func validateTime(layout string) Validator {
 
 // convert float to int.
 func convertInt(op Op, f FieldMeta, v interface{}) interface{} {
-	if op == IN || op == NIN {
-		sl, ok := v.([]interface{})
-		if !ok {
-			return v
-		}
-		for i, f := range sl {
-			newInt := int(f.(float64))
-			sl[i] = newInt
-		}
-		return sl
-	}
 	return int(v.(float64))
-}
-
-func convertSlice(op Op, f FieldMeta, v interface{}) interface{} {
-	t := f.Type
-	if isNumeric(t.Elem()) {
-		switch t.Elem().Kind() {
-		case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
-			reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
-
-			sl, ok := v.([]interface{})
-			if !ok {
-				return v
-			}
-			for i, f := range sl {
-				newInt := int(f.(float64))
-				sl[i] = newInt
-			}
-			return sl
-		}
-	}
-	return v
-}
-
-func isNumeric(t reflect.Type) bool {
-	switch t.Kind() {
-	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
-		reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr,
-		reflect.Float32, reflect.Float64,
-		reflect.Complex64, reflect.Complex128:
-		return true
-	default:
-		return false
-	}
-}
-
-// does not handle int IN []int
-func isComparable(t reflect.Type, t2 reflect.Type) bool {
-	return t == t2 || (isNumeric(t) && isNumeric(t2))
-}
-
-func validateSliceOp(op Op, f FieldMeta, v interface{}) error {
-	t := f.Type
-	if t.Kind() != reflect.Slice {
-		return fmt.Errorf("t is not a slice, wrong validate func")
-	}
-
-	vType := reflect.TypeOf(v)
-	if vType.Kind() != reflect.Slice {
-		return fmt.Errorf("not a slice")
-	}
-	return validateSliceElem(v, t.Elem())
-}
-
-func validateMapOp(op Op, f FieldMeta, v interface{}) error {
-	if op == EXISTS {
-		_, ok := v.(string)
-		if !ok {
-			return fmt.Errorf("exists expects a string arg")
-		}
-	}
-	if op == ALL {
-		_, ok := v.(map[string]interface{})
-		if !ok {
-			return fmt.Errorf("exists expects a string arg")
-		}
-	}
-	return nil
 }
 
 // convert string to time object.
