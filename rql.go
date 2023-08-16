@@ -556,7 +556,8 @@ func (p *parseState) relOp(op Op, terms []interface{}) {
 	for _, t := range terms {
 		if i > 0 {
 			p.WriteByte(' ')
-			p.WriteString(p.GetDBOp(op, nil))
+			op, _ := p.GetDBStatement(op, nil) // AND
+			p.WriteString(op)
 			p.WriteByte(' ')
 		}
 		mt, ok := t.(map[string]interface{})
@@ -610,8 +611,8 @@ func (p *parseState) fmtOp(f *FieldMeta, op Op) string {
 	}
 	p.argN++
 
-	colName := p.colName(f.Column)
-	return fmt.Sprintf("%v %v %v", colName, p.GetDBOp(op, f), param)
+	dbOp, fmtStr := p.Config.GetDBStatement(op, f)
+	return fmt.Sprintf(fmtStr, p.colName(f.Name), dbOp, param)
 }
 
 // colName formats the query field to database column name in cases the user configured a custom
